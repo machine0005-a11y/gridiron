@@ -293,7 +293,7 @@ function resize(){
   W = r.width; H = r.height;
   cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
   ctx.setTransform(dpr,0,0,dpr,0,0);
-  scale = W / VIEW_W;
+  scale = Math.max(1, Math.min(W / VIEW_W, H / 45));
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,120));

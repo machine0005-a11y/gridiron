@@ -37,4 +37,9 @@ console.log('PASS invalid roster feedback and retained manual roster');
 t.run("newGame(); callPlay('quick'); snap(); G.aim={wx:10,wy:20}; ptr={}; cancelPtr()");assert.equal(t.run('G.aim'),null);assert.equal(t.run('G.thrown'),false);
 for(const play of ['quick','cross','deep','run']){t.run(`newGame();callPlay('${play}');snap();for(let i=0;i<1800 && G.phase==='live';i++) update(1/60)`);assert.notEqual(t.run('G.phase'),'live'); t.flush();}
 console.log('PASS canceled pointer and four play simulations');
+for(const [width,height] of [[1707,590],[390,600],[844,230]]){
+  t.el('stage').getBoundingClientRect=()=>({width,height});t.run('resize()');
+  assert.ok(t.run('H/scale')>=45);
+}
+console.log('PASS downfield visibility at desktop, phone and landscape dimensions');
 
