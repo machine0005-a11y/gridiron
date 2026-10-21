@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gridiron</title>
 <style>
   :root{
@@ -23,7 +23,7 @@
     color:var(--chalk);
     display:flex;flex-direction:column;
     height:100dvh;
-    touch-action:none;user-select:none;-webkit-user-select:none;
+    user-select:none;-webkit-user-select:none;
   }
 
   /* ---- scoreboard ---- */
@@ -48,7 +48,7 @@
 
   /* ---- field ---- */
   #stage{flex:1 1 auto;position:relative;min-height:0}
-  canvas{display:block;width:100%;height:100%}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
 
   /* floating play banner over field */
   #flash{
@@ -84,9 +84,11 @@
   /* ---- overlays ---- */
   .screen{
     position:absolute;inset:0;background:rgba(8,14,11,.96);
-    display:flex;flex-direction:column;justify-content:center;
+    display:flex;flex-direction:column;justify-content:safe center;
     padding:24px;gap:14px;z-index:10;overflow-y:auto;
   }
+  .screen > *{flex-shrink:0}
+  .screen{touch-action:pan-y}
   .screen.hidden{display:none}
   h1{font-size:40px;font-weight:800;letter-spacing:-.03em;line-height:.95}
   h1 span{display:block;font-size:13px;font-weight:600;letter-spacing:.12em;color:var(--amber);margin-bottom:8px}
@@ -141,9 +143,10 @@
   </div>
 
   <div class="screen hidden" id="scrRoster">
-    <div class="lbl">Your roster</div>
-    <p class="note">One player per line: <code>Name, POS, rating</code>. Positions used: QB, RB, WR, TE. Rating 50&ndash;99 drives speed, arm strength and hands. This is the slot where an imported ESPN or Sleeper league would land.</p>
-    <textarea id="rosterBox" spellcheck="false"></textarea>
+    <label class="lbl" for="rosterBox">Your roster</label>
+    <p class="note">One player per line: <code>Name, POS, rating</code>. Positions used: QB, RB, WR, TE. Rating 50&ndash;99 drives speed, arm strength and hands. Enter at least four players. Unfilled positions use the original fictional players. Your roster stays in this tab until you reload; league URL imports are not available yet.</p>
+    <textarea id="rosterBox" spellcheck="false" aria-describedby="rosterError"></textarea>
+    <p class="note" id="rosterError" role="status"></p>
     <button class="btn" id="btnSaveRoster">Save roster</button>
     <button class="btn sec" id="btnBackRoster">Back</button>
   </div>
@@ -198,12 +201,13 @@ const DEFAULT_ROSTER = [
 ];
 
 let roster = null;
+let rosterEntries = DEFAULT_ROSTER.map(p=>[...p]);
 
 function parseRoster(text){
   const out = [];
   text.split('\n').forEach(line=>{
-    const p = line.split(',').map(s=>s.trim()).filter(Boolean);
-    if(p.length < 2) return;
+    const p = line.split(',').map(s=>s.trim());
+    if(p.length < 2 || !p[0]) return;
     const pos = p[1].toUpperCase();
     if(!['QB','RB','WR','TE'].includes(pos)) return;
     const r = Math.max(50, Math.min(99, parseInt(p[2]) || 75));
@@ -675,6 +679,8 @@ function resolveCatch(){
    PLAY RESOLUTION
    ============================================================ */
 function endPlay(kind){
+  if(G.phase !== 'live') return;
+  G.aim = null; G.joy = null; ptr = null;
   G.phase = 'result';
   const spot = G.carrier ? G.carrier.y : G.los;
   let gain = 0, turnover = false, td = false, dead = true;
@@ -781,47 +787,46 @@ const DRIVE_LINES = [
 function opponentDrive(){
   G.phase = 'drive';
   show('scrDrive', true);
+  renderDeck();
   const tick = document.getElementById('ticker');
   tick.innerHTML = '';
   document.getElementById('driveTitle').textContent = 'Opponent ball · own 25';
 
-  let yards = 25, i = 0, done = false;
+  // Resolve once before animation so skipping cannot change the outcome.
   const lines = [];
-  for(let k=0;k<5;k++) lines.push(DRIVE_LINES[(Math.random()*DRIVE_LINES.length)|0]);
-
+  let yards = 25;
+  for(let k=0;k<5 && G.clock > 0 && yards < 100;k++){
+    const [txt, gain, cls] = DRIVE_LINES[(Math.random()*DRIVE_LINES.length)|0];
+    lines.push([txt, cls]);
+    yards += gain;
+    G.clock = Math.max(0, G.clock - 26);
+  }
+  const scored = yards >= 100 || Math.random() < 0.32;
+  const points = scored ? (yards >= 100 || Math.random() < 0.75 ? 7 : 3) : 0;
+  G.them += points;
+  lines.push([points ? (points === 7 ? 'Touchdown' : 'Field goal') + ' — opponent' : 'Punt. You get the ball back.', 'score']);
+  paint();
+  let i = 0, done = false, timer;
   const step = ()=>{
     if(done) return;
-    if(i >= lines.length || yards >= 100){
-      const scored = yards >= 100 || Math.random() < 0.32;
-      const el = document.createElement('div');
-      el.className = 'score';
-      if(scored){ G.them += (Math.random()<0.75 ? 7 : 3); el.textContent = (Math.random()<0.75?'Touchdown':'Field goal') + ' — opponent'; }
-      else { el.textContent = 'Punt. You get the ball back.'; }
-      tick.appendChild(el);
-      paint();
-      done = true;
-      setTimeout(finishDrive, 900);
-      return;
-    }
-    const [txt, gain, cls] = lines[i++];
-    yards += gain;
+    if(i === lines.length){ timer = setTimeout(finishDrive, 900); return; }
+    const [txt, cls] = lines[i++];
     const el = document.createElement('div');
     el.className = cls; el.textContent = txt;
     tick.appendChild(el);
-    G.clock -= 26;
-    if(G.clock <= 0){ G.clock = 0; }
-    paint();
-    setTimeout(step, 420);
+    timer = setTimeout(step, 420);
   };
-  setTimeout(step, 380);
-
-  document.getElementById('scrDrive').onclick = ()=>{ if(!done){ done = true; finishDrive(); } };
+  timer = setTimeout(step, 380);
+  document.getElementById('scrDrive').onclick = finishDrive;
 
   function finishDrive(){
+    if(done) return;
+    done = true; clearTimeout(timer);
+    document.getElementById('scrDrive').onclick = null;
     show('scrDrive', false);
     if(G.clock <= 0){
+      if(G.qtr >= 4) return gameOver();
       G.qtr++;
-      if(G.qtr > 4) return gameOver();
       G.clock = QLEN;
     }
     G.los = 25; G.down = 1; G.togo = 10;
@@ -1117,6 +1122,8 @@ function renderDeck(){
 }
 
 function tryFG(){
+  if(G.phase !== 'playcall' || G.down !== 4) return;
+  G.phase = 'result'; renderDeck();
   const d = 117 - G.los;
   const good = Math.random() < clamp(1.22 - d/62, 0.12, 0.97);
   if(good){ G.us += 3; flash('IT IS GOOD', `${Math.round(d)} yards`, C.amber, 1200); }
@@ -1125,6 +1132,8 @@ function tryFG(){
   setTimeout(()=>afterResult('kick'), 1300);
 }
 function punt(){
+  if(G.phase !== 'playcall' || G.down !== 4) return;
+  G.phase = 'result'; renderDeck();
   flash('PUNT', 'Coffin corner', C.dim, 1000);
   G.clock -= 12;
   setTimeout(()=>afterResult('turnover'), 1100);
@@ -1168,6 +1177,7 @@ cv.addEventListener('pointermove', e=>{
 }, {passive:false});
 
 function releasePtr(e){
+  if(G.phase !== 'live'){ cancelPtr(); return; }
   if(!ptr) return;
   const quick = ptr.moved < 12 && (performance.now()-ptr.t0) < 260;
   if(G.aim){
@@ -1185,7 +1195,9 @@ function releasePtr(e){
   if(e) e.preventDefault();
 }
 cv.addEventListener('pointerup', releasePtr, {passive:false});
-cv.addEventListener('pointercancel', releasePtr, {passive:false});
+function cancelPtr(){ ptr = null; G.aim = null; G.joy = null; }
+cv.addEventListener('pointercancel', cancelPtr);
+window.addEventListener('blur', cancelPtr);
 
 /* ============================================================
    SCREENS
@@ -1201,7 +1213,8 @@ document.getElementById('btnMenu').onclick = ()=>{
 };
 document.getElementById('btnRoster').onclick = ()=>{
   document.getElementById('rosterBox').value =
-    DEFAULT_ROSTER.map(r=>r.join(', ')).join('\n');
+    rosterEntries.map(r=>r.join(', ')).join('\n');
+  document.getElementById('rosterError').textContent = '';
   show('scrTitle', false); show('scrRoster', true);
 };
 document.getElementById('btnBackRoster').onclick = ()=>{
@@ -1209,7 +1222,12 @@ document.getElementById('btnBackRoster').onclick = ()=>{
 };
 document.getElementById('btnSaveRoster').onclick = ()=>{
   const parsed = parseRoster(document.getElementById('rosterBox').value);
-  if(parsed) roster = buildRoster(parsed);
+  if(!parsed){
+    document.getElementById('rosterError').textContent = 'Enter at least four valid players: Name, QB/RB/WR/TE, rating.';
+    return;
+  }
+  rosterEntries = parsed;
+  roster = buildRoster(parsed);
   document.getElementById('usAbbr').textContent = 'YOU';
   show('scrRoster', false); show('scrTitle', true);
 };
@@ -1234,6 +1252,7 @@ renderDeck = function(){
   _renderDeck();
   const hidden = (G.phase === 'title' || G.phase === 'final');
   deckEl.style.display = hidden ? 'none' : 'flex';
+  resize();
 };
 deckEl.style.display = 'none';
 
